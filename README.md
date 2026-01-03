@@ -61,7 +61,7 @@ Kinerja model diukur menggunakan **MAPE (Mean Absolute Percentage Error)** pada 
 
 > **Kesimpulan:** Model **NARNN** terbukti jauh lebih unggul dengan MAPE sebesar **0.44%**, dibandingkan metode Holt-Winters yang memiliki error di atas 11%. Hal ini menunjukkan bahwa pendekatan nonlinear lebih efektif untuk memprediksi pergerakan harga emas Antam.
 
-![Perbandingan Prediksi](<HWA, HWM, dan NARNN.png>)
+![Perbandingan Prediksi](<HWA,HWM dan NARNN.png>)
 
 ## 💻 Instalasi & Penggunaan
 
