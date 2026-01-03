@@ -1,0 +1,597 @@
+---
+title: "Projek Prediksi Emas"
+author: "TS Forecasting"
+date: "`r Sys.Date()`"
+output:
+  powerpoint_presentation: default
+  beamer_presentation: default
+---
+
+# Library
+
+```{r}
+library(zoo)
+library(ggplot2)
+library(tseries)
+library(forecast)
+library(tidyr)
+library(MASS)
+```
+
+# Data Emas Harian Antam
+
+```{r}
+## Data Emas Harian Antam from 4 Jan 2010 - 2 Jan 2025
+gold = read.csv("D:/S2/Kommat/harga_emas_revised.csv");
+tail(gold)
+
+gold_date = as.Date(gold$Date, format = "%Y-%m-%d")
+head(gold_date)
+
+## Isi tanggal yang kosong
+full_date = seq(min(gold_date), max(gold_date), by="day")
+gold_full = merge(data.frame(Date=full_date), gold, all.x=TRUE)
+head(gold_full)
+tail(gold_full)
+
+## Interpolasi linear
+gold_full$Price <- na.approx(gold_full$Price)
+head(gold_full)
+tail(gold_full)
+write.csv(gold_full, file = "golf_price_full.csv")
+
+gold_ts = ts(gold_full$Price, frequency = 365, start=c(2010,4))
+head(gold_ts)
+tail(gold_ts)
+```
+
+# Plotting Data
+
+```{r}
+plot.ts(gold_ts, main = "Harga Emas Antam (IDR)", xlab = "Waktu", ylab= "Harga Emas")
+```
+
+# Metode Apa?
+
+![](images/clipboard-2060114030.png)
+
+# Analisis Deskriptif
+
+```{r}
+summary(gold_full$Price)
+boxplot(gold_full$Price, ylab = "Harga (IDR)", main = "BoxPlot Harga Emas ANTAM", col = "gold")
+which.min(gold_full$Price)
+which.max(gold_full$Price)
+```
+
+# Stationary
+
+```{r}
+adf.test(gold_ts)
+
+## Perlu Differencing
+data_diff = diff(gold_ts)
+plot(data_diff)
+data_diff
+adf.test(na.omit(data_diff))
+
+# Perlu Diffencing 1 Kali Bisa Menggunakan ARIMA
+```
+
+# Dekomposisi Data
+
+```{r}
+decomp_add = decompose(gold_ts, type = "additive")
+decomp_mul = decompose(gold_ts, type = "multiplicative")
+plot(decomp_add)
+```
+
+Dapat dilihat bahwa pola seasonal (musiman) dengan 10 kali osilasi dalam 5 tahun (seasonal 6 bulan) sangat jelas terlihat pada gambar tersebut, maka faktor seasonal menjadi penting
+
+Data harian dan 6 bulan $\approx$ 180 hari
+
+Coba SARIMA dan NNAR aja!
+
+# Split Data
+
+```{r}
+n = length(gold_ts)
+n_train <- floor(0.8 * n)   # 80% data untuk training
+length(test)
+length(train)
+train <- gold_ts[1:n_train]
+test  <- gold_ts[(n_train+1):n]
+test
+```
+
+## Plot
+
+```{r}
+library(dplyr)
+# Ubah time series menjadi data frame
+train_df <- data.frame(
+  Date = gold_full$Date[1:4384],
+  Value = as.numeric(train),
+  Set = "Training"
+)
+
+test_df <- data.frame(
+  Date = gold_full$Date[4385:5480],
+  Value = as.numeric(test),
+  Set = "Testing"
+)
+
+# Gabungkan training dan testing
+df_all <- bind_rows(train_df, test_df)
+
+# Tentukan tanggal awal testing untuk garis vertikal
+test_start_date <- min(test_df$Date)
+
+# Plot dengan ggplot2
+ggplot(df_all, aes(x = Date, y = Value, color = Set)) +
+  geom_line(size = 1) +
+  geom_vline(xintercept = as.numeric(test_start_date), 
+             linetype = "dashed", 
+             color = "black", 
+             size = 1) +
+  labs(
+    title = "Harga Emas ANTAM 2010-2025",
+    x = "Time",
+    y = "Harga (IDR)",
+    color = "Dataset"
+  ) +
+  scale_color_manual(values = c("Training" = "blue", "Testing" = "red")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+
+```
+
+# Differencing
+
+```{r}
+## Gunakan data yang sudah stasioner (data_diff)
+train %>% diff(lag=1) %>% ggtsdisplay()
+```
+
+## From the plots,
+
+Guessed SARIMA Model $(period = 180)$
+
+> From PACF : $p=1$ , $P=1$ or $P=0$
+>
+> From ACF : $q = 1$, $Q=1$ or $Q=0$
+
+Model Candidates :
+
+1.  $SARIMA(1,1,0)(1,1,0)$
+
+2.  $SARIMA(0,1,1)(0,1,1)$
+
+3.  $SARIMA(1,1,0)(1,1,0)$
+
+4.  $SARIMA(0,1,1)(0,1,1)$
+
+5.  $SARIMA(1,1,1)(1,1,1)$
+
+6.  $SARIMA(2,1,0)(0,1,1)$
+
+    etc.
+
+# Modelling SARIMA and ARIMA
+
+```{r}
+# ## Manual
+# fit1  <- Arima(train, order=c(0,1,1), seasonal=c(0,1,1))
+# fit2  <- Arima(train, order=c(1,1,0), seasonal=c(1,1,0))
+# fit3  <- Arima(train, order=c(1,1,1), seasonal=c(1,1,1))
+# fit4  <- Arima(train, order=c(2,1,0), seasonal=c(1,1,0))
+# fit5  <- Arima(train, order=c(2,1,1), seasonal=c(0,1,1))
+# fit6  <- Arima(train, order=c(0,1,2), seasonal=c(1,1,0))
+# fit7  <- Arima(train, order=c(1,1,2), seasonal=c(1,1,1))
+# fit8  <- Arima(train, order=c(2,1,2), seasonal=c(1,1,0))
+# fit9  <- Arima(train, order=c(2,1,2), seasonal=c(0,1,1))
+# fit10 <- Arima(train, order=c(0,1,1), seasonal=c(1,1,0))
+# fit11 <- Arima(train, order=c(1,1,0), seasonal=c(0,1,1))
+# fit12 <- Arima(train, order=c(2,1,1), seasonal=c(1,1,1))
+
+## Auto
+fit_auto = auto.arima(train,seasonal=TRUE,stepwise = FALSE, approximation = FALSE, lambda = "auto")
+summary(fit_auto)
+```
+
+Model ARIMA yang paling bagus hehe.
+
+Coba kita gaskan dulu pake model ARIMA(0,1,1) with drift
+
+# Forecast ARIMA
+
+```{r}
+## Auto.ARIMA Model
+h = length(test)
+fc_arima = forecast(fit_auto, h = h)
+accuracy(fc_arima, test)
+
+checkresiduals(fc_arima)
+```
+
+# Plot ARIMA
+
+```{r}
+# Membuat grafik hasil peramalan
+autoplot(fc_arima)
+library(ggplot2)
+p = ggplot()
+p = p + geom_line(aes(x=1:4384, y = train, color = "Data Training"))
+p = p + geom_line(aes(x=4385:n, y = test, color = "Data Testing"))
+p = p + geom_line(aes(x=4385:n, y = fc_arima$mean, color = "Prediksi ARIMA"))
+p = p + ylab("Harga")
+p = p + xlab("Harian")
+p = p + ggtitle("ARIMA(1,1,1) Forecast")
+p
+```
+
+# Coba Cek Heteroskedastis
+
+$H_0$ (null): tidak ada heteroskedastisitas (tidak ada efek ARCH) → varians residual konstan.
+
+$H_1$ (alternatif): ada heteroskedastisitas (ada efek ARCH).
+
+Jika p-value:
+
+p-value \> 0.05 → tidak ada heteroskedastisitas → ARIMA ok.
+
+p-value \< 0.05 → ada heteroskedastisitas → gunakan ARIMA-GARCH.
+
+```{r}
+arima_resid = residuals(fc_arima)
+Box.test(arima_resid^2,
+         lag = 10,
+         type = "Ljung-Box")
+
+```
+
+```{r}
+library(FinTS)
+# Plot residual ARIMA
+par(mfrow = c(2, 2))
+plot(arima_resid, main = "Residual ARIMA(1,1,1)", type = "l")
+acf(arima_resid, main = "ACF Residual ARIMA")
+acf(arima_resid^2, main = "ACF Squared Residual ARIMA") # Lihat volatility clustering
+
+# ARCH LM Test formal
+arch_test <- ArchTest(arima_resid, lags = 10)
+cat("\nARCH LM Test (Heteroskedastisitas):\n")
+cat("p-value:", arch_test$p.value, "\n")
+if (arch_test$p.value < 0.05) {
+  cat("Kesimpulan: Ada bukti heteroskedastisitas -> Perlukan GARCH\n")
+} else {
+  cat("Kesimpulan: Tidak ada bukti kuat heteroskedastisitas\n")
+}
+```
+
+![](images/clipboard-1194384045.png)
+
+Di sini:
+
+p = orde ARCH → pengaruh squared residual (shock) dari p periode sebelumnya.
+
+q = orde GARCH → pengaruh varians masa lalu dari q periode sebelumnya.
+
+Maka model ditulis sebagai: GARCH(p,q)
+
+# Penentuan Orde ARCH/GARCH
+
+```{r}
+# Lambda Train
+lambda_value = fit_auto$lambda
+
+# Transformasi data dengan lambda yang sama
+if (lambda_value == 0) {
+  transformed_data <- log(train)
+} else {
+  transformed_data <- ((train^lambda_value) - 1) / lambda_value
+}
+
+# Gunakan ARIMA GARCH
+library(rugarch)
+# Spesifikasi model GARCH(1,1)
+# Pilih distribusi error: "norm" (normal), "std" (student-t), "ged" (GED)
+
+spec_garch <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+  mean.model = list(armaOrder = c(1, 1), include.mean = TRUE, arfima = FALSE),
+  distribution.model = "std"
+)
+
+# Fit model ARIMA(1,1,1)-GARCH(1,1)
+garch_model <- ugarchfit(
+  spec = spec_garch, 
+  data = transformed_data,  # Gunakan data return asli, bukan residual
+)
+
+# Tampilkan hasil
+print(garch_model)
+```
+
+Dari hasil grid-search, AIC paling kecil adalah GARCH(1,2).
+
+```{r}
+# Extract standardized residuals
+std_residuals <- residuals(gjr_model, standardize = TRUE)
+squared_std_residuals <- std_residuals^2
+
+# Uji Ljung-Box pada standardized residuals
+cat("\n=== DIAGNOSTIC CHECKS ===\n")
+
+# Test untuk mean
+cat("\nLjung-Box Test pada Standardized Residuals (Mean):\n")
+for (lag in c(10, 15, 20)) {
+  lb_test_mean <- Box.test(std_residuals, lag = lag, type = "Ljung-Box")
+  cat(sprintf("Lag %d: p-value = %.4f %s\n", 
+              lag, 
+              lb_test_mean$p.value,
+              ifelse(lb_test_mean$p.value > 0.05, "✓ OK", "✗ Masalah")))
+}
+
+# Test untuk variance
+cat("\nLjung-Box Test pada Squared Standardized Residuals (Variance):\n")
+for (lag in c(10, 15, 20)) {
+  lb_test_var <- Box.test(squared_std_residuals, lag = lag, type = "Ljung-Box")
+  cat(sprintf("Lag %d: p-value = %.4f %s\n", 
+              lag, 
+              lb_test_var$p.value,
+              ifelse(lb_test_var$p.value > 0.05, "✓ OK", "✗ Masalah")))
+}
+
+# Plot diagnostik
+par(mfrow = c(2, 2))
+plot(garch_model, which = 8) # Standardized residuals
+plot(garch_model, which = 9) # ACF of standardized residuals
+plot(garch_model, which = 10) # ACF of squared standardized residuals
+plot(garch_model, which = 11) # Cross correlation
+```
+
+Residual bagus (memenuhi Box-Ljung)
+
+```{r}
+# Coba GJR-GARCH untuk leverage effect
+spec_gjr <- ugarchspec(
+  variance.model = list(model = "gjrGARCH", garchOrder = c(1,1)),
+  mean.model = list(armaOrder = c(1, 1), include.mean = TRUE),
+  distribution.model = "std"
+)
+
+gjr_model <- ugarchfit(spec = spec_gjr, data = transformed_data)
+
+# Coba EGARCH
+spec_egarch <- ugarchspec(
+  variance.model = list(model = "eGARCH", garchOrder = c(1, 1)),
+  mean.model = list(armaOrder = c(1, 1), include.mean = TRUE),
+  distribution.model = "std"
+)
+
+egarch_model <- ugarchfit(spec = spec_egarch, data = transformed_data)
+
+# Bandingkan model berdasarkan AIC/BIC
+cat("\n=== PERBANDINGAN MODEL ===\n")
+cat("GARCH(1,1) AIC:", infocriteria(garch_model)[1], "\n")
+cat("GJR-GARCH AIC:", infocriteria(gjr_model)[1], "\n")
+cat("EGARCH AIC:", infocriteria(egarch_model)[1], "\n")
+```
+
+```{r}
+# Untuk forecasting: perlu inverse transform
+egarch_forecast <- ugarchforecast(egarch_model, n.ahead = length(test))
+forecast_values <- fitted(egarch_forecast)
+
+# Inverse Box-Cox transform
+if (lambda_value == 0) {
+  final_forecast <- exp(forecast_values)
+} else {
+  final_forecast <- (forecast_values * lambda_value + 1)^(1/lambda_value)
+}
+class(test)
+
+final_forecast = as.numeric(final_forecast)
+accuracy(final_forecast,test)
+```
+
+```{r}
+library(ggplot2)
+p = ggplot()
+p = p + geom_line(aes(x=1:4384, y = train, color = "Data Training"))
+p = p + geom_line(aes(x=4385:n, y = test, color = "Data Testing"))
+p = p + geom_line(aes(x=nrow(final_forecast), y = final_forecast, color = "Prediksi EGARCH"))
+p = p + ylab("HARGA EMAS ANTAM")
+p = p + xlab("Harian")
+p = p + ggtitle("EGARCH")
+p
+```
+
+# NNAR Model
+
+```{r}
+library(forecast)
+library(ggplot2)
+
+# Fit NNAR model
+nnar_model <- nnetar(train)
+
+# Summary model
+summary(nnar_model)
+
+# Forecasting
+nnar_forecast <- forecast(nnar_model, h = length(test)) 
+# Plot results
+autoplot(nnar_forecast) +
+  ggtitle("NNAR Forecast") +
+  xlab("Time") + ylab("Value")
+
+accuracy(nnar_forecast, test)
+```
+
+```{r}
+# # Time series cross-validation untuk NNAR
+# library(forecast)
+# 
+# ts_cv_nnar <- function(ts_data, h = 1, p_range = 1:12, size_range = 1:10) {
+#   best_mae <- Inf
+#   best_params <- list()
+# 
+#   for (p in p_range) {
+#     for (size in size_range) {
+#       tryCatch({
+#         # Fit model dengan rolling origin
+#         cv_errors <- tsCV(ts_data, forecastfunction = function(x, h) {
+#           forecast(nnetar(x, p = p, size = size), h = h)
+#         }, h = h)
+# 
+#         mae <- mean(abs(cv_errors), na.rm = TRUE)
+# 
+#         if (mae < best_mae) {
+#           best_mae <- mae
+#           best_params <- list(p = p, size = size, mae = mae)
+#         }
+#       }, error = function(e) {
+#         # Skip jika error
+#       })
+#     }
+#   }
+# 
+#   return(best_params)
+# }
+# 
+# # Jalankan CV (might take some time)
+# best_params <- ts_cv_nnar(train, h = length(test))
+# cat("Best parameters from CV:\n")
+# print(best_params)
+# 
+# # Fit final model dengan best parameters
+# nnar_final <- nnetar(train, p = best_params$p, size = best_params$size)
+```
+
+```{r}
+fit_auto = auto.arima(train,seasonal=TRUE,stepwise = FALSE, approximation = FALSE, lambda = "auto")
+```
+
+# Kesimpulan (masih jelek):
+
+ARIMA(0,1,1) with Drift : MAPE 10.41%
+
+ARIMA(1,1,1) with Drift and Box Cox : MAPE 7.11%
+
+NNAR Manual : MAPE 13.35%
+
+NNAR Auto : MAPE 13.99%
+
+HARUS APA?
+
+# Holt-Winters
+
+```{r}
+train_ts = ts(train, frequency = 365, start = c(2010,4))
+test_ts = ts(test, frequency = 365, start = c(2022,5))
+hw_add = HoltWinters(train_ts, seasonal = "additive")
+hw_mul = HoltWinters(train_ts, seasonal = "multiplicative")
+```
+
+## Summary Model HW
+
+```{r}
+hw_add
+hw_mul
+```
+
+## Forecast HW
+
+```{r}
+h= length(test)
+fc_hw_add = forecast(hw_add, h = h)
+fc_hw_mul = forecast(hw_mul, h = h)
+```
+
+## Plot HW
+
+```{r}
+autoplot(fc_hw_add)
+autoplot(fc_hw_mul)
+
+p = ggplot()
+p = p + geom_line(aes(x=1:4384, y = train, color = "Data Training"))
+p = p + geom_line(aes(x=4385:n, y = test, color = "Data Testing"))
+p = p + geom_line(aes(x=4385:n, y = fc_hw_add$mean, color = "HW Additive"))
+p = p + geom_line(aes(x=4385:n, y = fc_hw_mul$mean, color = "HW Multiplicative"))
+p = p + ylab("HARGA EMAS ANTAM")
+p = p + xlab("Harian")
+p = p + ggtitle("HW Forecast")
+p
+```
+
+```{r}
+# Akurasi MAPE
+accuracy(test_ts, fc_hw_add$mean)
+accuracy(test_ts, fc_hw_mul$mean)
+```
+
+# HW + Box-Cox
+
+```{r}
+lambda = BoxCox.lambda(train)
+train_bc = BoxCox(train, lambda)
+train_bc_ts = ts(train_bc, frequency = 365, start = c(2010,4))
+
+hw_add_bc = HoltWinters(train_bc_ts, seasonal = "additive")
+hw_mul_bc = HoltWinters(train_bc_ts, seasonal = "multiplicative")
+
+hw_add_bc
+
+fc_hw_add_bc = forecast(hw_add_bc, h = h)
+fc_hw_mul_bc = forecast(hw_mul_bc, h = h)
+
+fc_hw_ori_add = InvBoxCox(fc_hw_add_bc$mean, lambda)
+fc_hw_ori_mul = InvBoxCox(fc_hw_mul_bc$mean, lambda)
+
+p = ggplot()
+p = p + geom_line(aes(x=1:4384, y = train, color = "Data Training"))
+p = p + geom_line(aes(x=4385:n, y = test, color = "Data Testing"))
+p = p + geom_line(aes(x=4385:n, y = fc_hw_ori_add, color = "HW Additive + BC"))
+p = p + geom_line(aes(x=4385:n, y = fc_hw_ori_mul, color = "HW Multiplicative + BC"))
+p = p + ylab("HARGA EMAS ANTAM")
+p = p + xlab("Harian")
+p = p + ggtitle("HW + BC Forecast")
+p
+
+accuracy(fc_hw_ori_add, test)
+accuracy(fc_hw_ori_mul, test)
+```
+
+# What if BC Transform from the first step?
+
+```{r}
+plot(BoxCox(gold_ts, lambda), ylab="Harga Transformasi", main = "Transformasi Box-Cox Harga Emas ANTAM")
+BoxCox.lambda(train, method = "guerrero")
+
+transformed_data = BoxCox(train, lambda)
+acf_diff = acf(diff(transformed_data), main = "ACF sesudah differencing")
+acf_diff = pacf(diff(transformed_data), main = "PACF sesudah differencing")
+
+
+par(mfrow=c(1,2))
+acf_bc = acf(BoxCox(train, lambda), main = "ACF Data Transformasi")
+pacf_bc = pacf(BoxCox(train, lambda), main = "PACF Data Transformasi")
+
+par(mfrow=c(1,2))
+acf_diff = acf(diff(transformed_data), main = "ACF sesudah differencing")
+acf_diff = pacf(diff(transformed_data), main = "PACF sesudah differencing")
+```
+
+```{r}
+fit1  <- Arima(transformed_data, order=c(0,1,1), include.drift = TRUE)
+fit2  <- Arima(transformed_data, order=c(1,1,1), include.drift = TRUE)
+fit3  <- Arima(transformed_data, order=c(1,1,2), include.drift = TRUE)
+fit4  <- Arima(transformed_data, order=c(2,1,2), include.drift = TRUE)
+
+AIC(fit1,fit2,fit3,fit4,fit_auto)
+```
