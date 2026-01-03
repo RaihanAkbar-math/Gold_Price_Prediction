@@ -69,6 +69,11 @@ Proyek ini dapat dijalankan menggunakan **MATLAB** (untuk NARNN) atau **R** (unt
 
 ### Prasyarat
 * **R / RStudio** (Paket: `forecast`, `tseries`, `ggplot2`)
+  ```r
+  library(forecast)
+  library(tseries)
+  library(ggplot2)
+  ```
 * **MATLAB** (Neural Network Toolbox)
 
 ### Cara Menjalankan
